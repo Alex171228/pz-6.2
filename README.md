@@ -77,9 +77,10 @@ curl -i -X POST http://<SERVER_IP>:8082/v1/tasks \
   -d '{"title":"Logs","description":"Implement zap","due_date":"2026-01-12"}'
 ```
 
-Ожидаемый результат: 201 Created. В логах Tasks видно цепочку gRPC verify → token verified → task created → request completed. В логах Auth — verify request received → token verified.
+201 Created. В логах Tasks видно цепочку gRPC verify → token verified → task created → request completed. В логах Auth — verify request received → token verified. 
 
-<!-- Вставить скриншот: ответ curl + логи Auth и Tasks на сервере -->
+<img width="1898" height="126" alt="image" src="https://github.com/user-attachments/assets/4c229940-2ec2-48ad-99dc-197300437c88" /> 
+
 
 ### 3.2. Запрос с ошибкой — невалидный токен
 
@@ -89,9 +90,11 @@ curl -i http://<SERVER_IP>:8082/v1/tasks \
   -H "X-Request-ID: pz19-003"
 ```
 
-Ожидаемый результат: 401 Unauthorized. В логах Tasks уровень `warn` — `auth gRPC verify: unauthorized`, `invalid token`. Токен не попадает в логи (только `has_auth: true`).
+401 Unauthorized. В логах Tasks уровень `warn` — `auth gRPC verify: unauthorized`, `invalid token`. Токен не попадает в логи (только `has_auth: true`). 
 
-<!-- Вставить скриншот: ответ curl + логи Auth и Tasks на сервере -->
+
+<img width="1904" height="300" alt="image" src="https://github.com/user-attachments/assets/3de613f4-9731-4856-8521-5ff4e3939d73" /> 
+
 
 ### 3.3. Межсервисный вызов — корреляция по request-id
 
@@ -114,9 +117,10 @@ curl -i -X POST http://<SERVER_IP>:8082/v1/tasks \
   -d '{"title":"Cross-service","description":"Test correlation","due_date":"2026-01-12"}'
 ```
 
-Ожидаемый результат: по `request_id: "pz19-002"` можно найти связанные события в логах обоих сервисов (Auth и Tasks).
+По `request_id: "pz19-002"` можно найти связанные события в логах обоих сервисов (Auth и Tasks).
 
-<!-- Вставить скриншот: логи Auth (request_id pz19-001 + pz19-002) и логи Tasks (request_id pz19-002) -->
+<img width="1899" height="407" alt="image" src="https://github.com/user-attachments/assets/02aebe24-4ba9-4a27-bdba-03332d343e5c" /> 
+
 
 ---
 
@@ -151,32 +155,7 @@ go run ./services/tasks/cmd/tasks
 
 ### Проверка (3-й терминал)
 
-Получить токен:
-
-```bash
-curl -s -X POST http://localhost:8081/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -H "X-Request-ID: pz19-001" \
-  -d '{"username":"student","password":"student"}'
-```
-
-Создать задачу (успешный запрос, видно request-id в логах обоих сервисов):
-
-```bash
-curl -i -X POST http://localhost:8082/v1/tasks \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer demo-token" \
-  -H "X-Request-ID: pz19-002" \
-  -d '{"title":"Logs","description":"Implement zap","due_date":"2026-01-12"}'
-```
-
-Запрос с невалидным токеном (ошибка 401, уровень warn в логах):
-
-```bash
-curl -i http://localhost:8082/v1/tasks \
-  -H "Authorization: Bearer invalid-token" \
-  -H "X-Request-ID: pz19-003"
-```
+Выполните запросы из пункта 3 и посмотрите логи в консоли сервера для проверки работы.
 
 ---
 
