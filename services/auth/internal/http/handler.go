@@ -2,20 +2,22 @@ package http
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"strings"
 
+	"go.uber.org/zap"
+
 	"pz1.2/services/auth/internal/service"
-	"pz1.2/shared/middleware"
+	"pz1.2/shared/logger"
 )
 
 type Handler struct {
 	authService *service.AuthService
+	log         *zap.Logger
 }
 
-func NewHandler(authService *service.AuthService) *Handler {
-	return &Handler{authService: authService}
+func NewHandler(authService *service.AuthService, log *zap.Logger) *Handler {
+	return &Handler{authService: authService, log: log}
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
@@ -24,32 +26,32 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 }
 
 func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
-	requestID := middleware.GetRequestID(r.Context())
-	log.Printf("[%s] Processing login request", requestID)
+	l := logger.FromContext(r.Context()).With(zap.String("component", "handler"))
 
 	var req service.LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		l.Warn("invalid request body", zap.Error(err))
 		h.respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
 
 	resp, err := h.authService.Login(req.Username, req.Password)
 	if err != nil {
-		log.Printf("[%s] Login failed: %v", requestID, err)
+		l.Warn("login failed", zap.String("username", req.Username))
 		h.respondJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	}
 
-	log.Printf("[%s] Login successful for user: %s", requestID, req.Username)
+	l.Info("login successful", zap.String("username", req.Username))
 	h.respondJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) handleVerify(w http.ResponseWriter, r *http.Request) {
-	requestID := middleware.GetRequestID(r.Context())
-	log.Printf("[%s] Processing verify request", requestID)
+	l := logger.FromContext(r.Context()).With(zap.String("component", "handler"))
 
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
+		l.Warn("missing authorization header")
 		h.respondJSON(w, http.StatusUnauthorized, service.VerifyResponse{
 			Valid: false,
 			Error: "missing authorization header",
@@ -59,6 +61,7 @@ func (h *Handler) handleVerify(w http.ResponseWriter, r *http.Request) {
 
 	parts := strings.SplitN(authHeader, " ", 2)
 	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+		l.Warn("invalid authorization format")
 		h.respondJSON(w, http.StatusUnauthorized, service.VerifyResponse{
 			Valid: false,
 			Error: "invalid authorization format",
@@ -69,12 +72,12 @@ func (h *Handler) handleVerify(w http.ResponseWriter, r *http.Request) {
 	token := parts[1]
 	resp, err := h.authService.Verify(token)
 	if err != nil {
-		log.Printf("[%s] Token verification failed: %v", requestID, err)
+		l.Warn("token verification failed", zap.Bool("has_auth", true))
 		h.respondJSON(w, http.StatusUnauthorized, resp)
 		return
 	}
 
-	log.Printf("[%s] Token verified for subject: %s", requestID, resp.Subject)
+	l.Info("token verified", zap.String("subject", resp.Subject))
 	h.respondJSON(w, http.StatusOK, resp)
 }
 

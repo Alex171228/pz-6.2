@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"time"
+
+	"go.uber.org/zap"
 
 	"pz1.2/shared/middleware"
 )
@@ -15,6 +16,7 @@ import (
 type HTTPClient struct {
 	httpClient *http.Client
 	baseURL    string
+	log        *zap.Logger
 }
 
 type VerifyResponse struct {
@@ -23,12 +25,13 @@ type VerifyResponse struct {
 	Error   string `json:"error,omitempty"`
 }
 
-func NewHTTPClient(baseURL string, timeout time.Duration) *HTTPClient {
+func NewHTTPClient(baseURL string, timeout time.Duration, log *zap.Logger) *HTTPClient {
 	return &HTTPClient{
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
 		baseURL: baseURL,
+		log:     log.With(zap.String("component", "auth_client_http")),
 	}
 }
 
@@ -37,7 +40,8 @@ func (c *HTTPClient) Verify(ctx context.Context, token string) (*VerifyResponse,
 	defer cancel()
 
 	requestID := middleware.GetRequestID(ctx)
-	log.Printf("[%s] Calling Auth HTTP verify", requestID)
+	l := c.log.With(zap.String("request_id", requestID))
+	l.Debug("calling auth HTTP verify")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/auth/verify", nil)
 	if err != nil {
@@ -51,7 +55,7 @@ func (c *HTTPClient) Verify(ctx context.Context, token string) (*VerifyResponse,
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		log.Printf("[%s] Auth HTTP verify failed: %v", requestID, err)
+		l.Error("auth HTTP verify failed", zap.Error(err))
 		return nil, fmt.Errorf("auth service unavailable: %w", err)
 	}
 	defer resp.Body.Close()
@@ -67,15 +71,15 @@ func (c *HTTPClient) Verify(ctx context.Context, token string) (*VerifyResponse,
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		log.Printf("[%s] Auth HTTP verify: unauthorized", requestID)
+		l.Warn("auth HTTP verify: unauthorized")
 		return &verifyResp, nil
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("[%s] Auth HTTP verify: unexpected status %d", requestID, resp.StatusCode)
+		l.Error("auth HTTP verify: unexpected status", zap.Int("status", resp.StatusCode))
 		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
 	}
 
-	log.Printf("[%s] Auth HTTP verify: success, subject=%s", requestID, verifyResp.Subject)
+	l.Debug("auth HTTP verify: success", zap.String("subject", verifyResp.Subject))
 	return &verifyResp, nil
 }

@@ -1,96 +1,148 @@
-# Практические занятия №1 и №2: Микросервисная архитектура
+# Практическое задание 3
+## Шишков А.Д. ЭФМО-02-22
+## Тема
+Структурированное логирование в серверных приложениях.
 
-## Описание
+## Цель
+Научиться внедрять структурированные логи в сервис и применять единый стандарт логирования для диагностики и эксплуатации.
 
-Учебная система из двух микросервисов для демонстрации межсервисного взаимодействия через HTTP и gRPC.
+---
 
-### Границы сервисов
+## 1. Выбор логгера
 
-**Auth Service:**
-- Выдача токенов (упрощённая модель)
-- Проверка токенов
-- Возвращает информацию: валидный/не валидный
+Выбран **zap** (`go.uber.org/zap`).
 
-**Tasks Service:**
-- CRUD операции над задачами
-- Перед выполнением операций проверяет токен через Auth
+Причины:
 
-## Структура проекта
+- Выдаёт JSON по умолчанию — логи сразу готовы для парсинга (ELK, Loki, jq).
+- Высокая производительность — zero-allocation в hot path, что важно для микросервисов под нагрузкой.
+- Типизированные поля (`zap.String`, `zap.Int`, `zap.Error`) исключают случайную запись чувствительных данных через `fmt.Sprintf`.
+- Широко используется в production Go-проектах.
 
-```
-pz1.2/
-├── services/
-│   ├── auth/
-│   │   ├── cmd/auth/main.go          # Точка входа Auth
-│   │   └── internal/
-│   │       ├── http/handler.go       # HTTP хендлеры
-│   │       ├── grpc/server.go        # gRPC сервер
-│   │       └── service/auth.go       # Бизнес-логика
-│   └── tasks/
-│       ├── cmd/tasks/main.go         # Точка входа Tasks
-│       └── internal/
-│           ├── http/handler.go       # HTTP хендлеры
-│           ├── service/task.go       # Бизнес-логика
-│           └── client/authclient/    # Клиенты для Auth
-│               ├── client.go         # Интерфейс
-│               ├── http.go           # HTTP клиент (ПЗ1)
-│               └── grpc.go           # gRPC клиент (ПЗ2)
-├── shared/
-│   ├── middleware/
-│   │   ├── requestid.go              # Middleware для X-Request-ID
-│   │   └── logging.go                # Middleware для логирования
-│   └── httpx/
-│       └── client.go                 # HTTP клиент с таймаутом
-├── proto/
-│   ├── auth.proto                    # Определение gRPC контракта
-│   └── auth/                         # Сгенерированный код
-├── docs/
-│   └── api.md                        # Документация API
-├── scripts/                          # Скрипты запуска
-├── go.mod
-└── README.md
-```
+---
 
-## Требования
+## 2. Стандарт полей логов
 
-- Go 1.21+
+Во всех сервисах (auth, tasks) используется единая схема полей:
 
-## Запуск на сервере
+### Обязательные поля
 
-### Установка зависимостей
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `level` | string | Уровень: debug / info / warn / error |
+| `ts` | string | Время события (ISO 8601) |
+| `msg` | string | Описание события |
+| `service` | string | Имя сервиса: `auth` или `tasks` |
+| `request_id` | string | X-Request-ID (из заголовка или сгенерированный UUID) |
+
+### Поля access log (middleware)
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `method` | string | HTTP-метод (GET, POST, PATCH, DELETE) |
+| `path` | string | Путь запроса (`/v1/tasks`) |
+| `status` | int | Код ответа (200, 401, 503...) |
+| `duration_ms` | float | Длительность обработки в миллисекундах |
+| `remote_ip` | string | IP-адрес клиента |
+
+### Поля для ошибок и контекста
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `error` | string | Текст ошибки (без секретов) |
+| `component` | string | Компонент: `handler`, `auth_middleware`, `auth_client_grpc`, `grpc_server` |
+| `task_id` | string | ID задачи (при CRUD-операциях) |
+| `subject` | string | Субъект из токена (при успешной верификации) |
+| `has_auth` | bool | Факт наличия токена (без самого значения) |
+
+### Что запрещено логировать
+
+- Пароли
+- Токены доступа и refresh-токены
+- Секреты и ключи
+- Содержимое cookies
+
+---
+
+## 3. Примеры лог-событий
+
+### 3.1. Успешный запрос — создание задачи
+
+Команда (выполняется с ноутбука, `<SERVER_IP>` — IP сервера):
 
 ```bash
-git clone <repository>
+curl -i -X POST http://<SERVER_IP>:8082/v1/tasks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer demo-token" \
+  -H "X-Request-ID: pz19-002" \
+  -d '{"title":"Logs","description":"Implement zap","due_date":"2026-01-12"}'
+```
+
+Ожидаемый результат: 201 Created. В логах Tasks видно цепочку gRPC verify → token verified → task created → request completed. В логах Auth — verify request received → token verified.
+
+<!-- Вставить скриншот: ответ curl + логи Auth и Tasks на сервере -->
+
+### 3.2. Запрос с ошибкой — невалидный токен
+
+```bash
+curl -i http://<SERVER_IP>:8082/v1/tasks \
+  -H "Authorization: Bearer invalid-token" \
+  -H "X-Request-ID: pz19-003"
+```
+
+Ожидаемый результат: 401 Unauthorized. В логах Tasks уровень `warn` — `auth gRPC verify: unauthorized`, `invalid token`. Токен не попадает в логи (только `has_auth: true`).
+
+<!-- Вставить скриншот: ответ curl + логи Auth и Tasks на сервере -->
+
+### 3.3. Межсервисный вызов — корреляция по request-id
+
+Шаг 1 — получить токен:
+
+```bash
+curl -s -X POST http://<SERVER_IP>:8081/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -H "X-Request-ID: pz19-001" \
+  -d '{"username":"student","password":"student"}'
+```
+
+Шаг 2 — создать задачу (тот же request-id видно в обоих сервисах):
+
+```bash
+curl -i -X POST http://<SERVER_IP>:8082/v1/tasks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer demo-token" \
+  -H "X-Request-ID: pz19-002" \
+  -d '{"title":"Cross-service","description":"Test correlation","due_date":"2026-01-12"}'
+```
+
+Ожидаемый результат: по `request_id: "pz19-002"` можно найти связанные события в логах обоих сервисов (Auth и Tasks).
+
+<!-- Вставить скриншот: логи Auth (request_id pz19-001 + pz19-002) и логи Tasks (request_id pz19-002) -->
+
+---
+
+## 4. Инструкция запуска и проверки
+
+### Установка
+
+```bash
+git clone https://github.com/Alex171228/pz1.2.git
 cd pz1.2
 go mod download
 ```
 
-### ПЗ1: HTTP взаимодействие
+### Запуск (2 терминала)
 
-**Терминал 1 - Auth Service:**
-```bash
-export AUTH_PORT=8081
-go run ./services/auth/cmd/auth
-```
+**Терминал 1 — Auth Service:**
 
-**Терминал 2 - Tasks Service (HTTP режим):**
-```bash
-export TASKS_PORT=8082
-export AUTH_BASE_URL=http://localhost:8081
-export AUTH_MODE=http
-go run ./services/tasks/cmd/tasks
-```
-
-### ПЗ2: gRPC взаимодействие
-
-**Терминал 1 - Auth Service:**
 ```bash
 export AUTH_PORT=8081
 export AUTH_GRPC_PORT=50051
 go run ./services/auth/cmd/auth
 ```
 
-**Терминал 2 - Tasks Service (gRPC режим):**
+**Терминал 2 — Tasks Service (gRPC режим):**
+
 ```bash
 export TASKS_PORT=8082
 export AUTH_GRPC_ADDR=localhost:50051
@@ -98,89 +150,57 @@ export AUTH_MODE=grpc
 go run ./services/tasks/cmd/tasks
 ```
 
-## Переменные окружения
+### Проверка (3-й терминал)
 
-### Auth Service
+Получить токен:
 
-| Переменная | Описание | По умолчанию |
-|------------|----------|--------------|
-| AUTH_PORT | Порт HTTP сервера | 8081 |
-| AUTH_GRPC_PORT | Порт gRPC сервера | 50051 |
-
-### Tasks Service
-
-| Переменная | Описание | По умолчанию |
-|------------|----------|--------------|
-| TASKS_PORT | Порт HTTP сервера | 8082 |
-| AUTH_MODE | Режим: http или grpc | http |
-| AUTH_BASE_URL | URL Auth (для HTTP) | http://localhost:8081 |
-| AUTH_GRPC_ADDR | Адрес Auth (для gRPC) | localhost:50051 |
-
-## Тестирование
-
-### Получение токена
 ```bash
 curl -s -X POST http://localhost:8081/v1/auth/login \
   -H "Content-Type: application/json" \
-  -H "X-Request-ID: req-001" \
+  -H "X-Request-ID: pz19-001" \
   -d '{"username":"student","password":"student"}'
 ```
 
-### Создание задачи
+Создать задачу (успешный запрос, видно request-id в логах обоих сервисов):
+
 ```bash
 curl -i -X POST http://localhost:8082/v1/tasks \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer demo-token" \
-  -H "X-Request-ID: req-002" \
-  -d '{"title":"Do PZ17","description":"split services","due_date":"2026-01-10"}'
+  -H "X-Request-ID: pz19-002" \
+  -d '{"title":"Logs","description":"Implement zap","due_date":"2026-01-12"}'
 ```
 
-### Получение задач
+Запрос с невалидным токеном (ошибка 401, уровень warn в логах):
+
 ```bash
 curl -i http://localhost:8082/v1/tasks \
-  -H "Authorization: Bearer demo-token" \
-  -H "X-Request-ID: req-003"
+  -H "Authorization: Bearer invalid-token" \
+  -H "X-Request-ID: pz19-003"
 ```
 
-### Запрос без токена (должен вернуть 401)
-```bash
-curl -i http://localhost:8082/v1/tasks \
-  -H "X-Request-ID: req-004"
-```
+---
 
-## Контрольные вопросы
+## 5. Контрольные вопросы
 
-### ПЗ1
+**1. Почему структурированные логи удобнее строковых?**
 
-1. **Почему межсервисный вызов должен иметь таймаут?**
-   - Предотвращение каскадных отказов
-   - Освобождение ресурсов при зависании
-   - Быстрое информирование клиента об ошибке
+Структурированные логи (JSON) можно парсить, фильтровать и агрегировать автоматически. Строковые логи требуют regex для извлечения данных, что ненадёжно и медленно.
 
-2. **Как request-id помогает при диагностике ошибок?**
-   - Позволяет связать логи разных сервисов
-   - Упрощает поиск проблем в распределённой системе
+**2. Что такое request-id и как он помогает при диагностике?**
 
-3. **Какой статус нужно вернуть клиенту на невалидный токен?**
-   - 401 Unauthorized
+X-Request-ID — уникальный идентификатор запроса, который прокидывается через все сервисы в цепочке вызовов. Позволяет по одному ID найти все связанные лог-события в разных сервисах.
 
-4. **Как описать "точку отказа" между сервисами?**
-   - Auth недоступен → 503 Service Unavailable
+**3. Какие поля вы считаете обязательными для access log?**
 
-### ПЗ2
+`request_id`, `method`, `path`, `status`, `duration_ms`, `service`. Без них невозможно ответить на базовые вопросы: какой запрос, куда, как быстро, с каким результатом.
 
-1. **Что такое .proto и почему он считается контрактом?**
-   - Формальное описание API
-   - Генерация кода для клиента и сервера
+**4. Почему нельзя писать токены и пароли в логи?**
 
-2. **Что такое deadline в gRPC и чем он полезен?**
-   - Ограничение времени на выполнение запроса
-   - Автоматическая отмена при превышении
+Логи часто хранятся в открытом виде, реплицируются в системы мониторинга, доступны широкому кругу разработчиков. Утечка токена из логов = компрометация пользователя.
 
-3. **Почему "exactly-once" не может быть так прост в RPC?**
-   - Сетевые сбои и повторы
-   - Нужна идемпотентность
+**5. Что логировать в ERROR, а что в INFO/WARN?**
 
-4. **Как обеспечивать совместимость при расширении .proto?**
-   - Добавление новых полей с новыми номерами
-   - Использовать reserved для защиты
+- **INFO** — штатные события: запрос завершён, задача создана, сервер запущен.
+- **WARN** — ожидаемые проблемы: невалидный токен, задача не найдена, неверный формат.
+- **ERROR** — неожиданные сбои: auth недоступен, ошибка БД, таймаут межсервисного вызова.
