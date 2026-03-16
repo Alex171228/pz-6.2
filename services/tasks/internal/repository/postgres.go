@@ -112,7 +112,7 @@ func (r *PostgresRepository) SearchByTitle(title string) ([]*service.Task, error
 }
 
 func scanTasks(rows *sql.Rows) ([]*service.Task, error) {
-	var tasks []*service.Task
+	tasks := make([]*service.Task, 0)
 	for rows.Next() {
 		t := &service.Task{}
 		if err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.DueDate, &t.Done, &t.CreatedAt); err != nil {
