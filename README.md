@@ -236,7 +236,7 @@ fetch('/profile', {method:'POST', headers:{'Content-Type':'application/x-www-for
 
 6. Для проверки **комментариев**: перейти на `/comments`, ввести комментарий с HTML-тегами (например `<b>bold</b><script>alert(1)</script>`). Теги отобразятся как текст — экранирование работает.
 
-7. Для проверки можно использовать postman коллекцию 
+7. Для проверки можно использовать postman коллекцию https://github.com/Alex171228/pz-6.2/blob/main/pz6_postman_collection.json
 
 ### Остановка
 
