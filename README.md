@@ -155,31 +155,38 @@ http.SetCookie(w, &http.Cookie{
 
 **1. Cookie сессии — `session_id` с флагом HttpOnly:**
 
-![Cookie](docs/images/pz6_cookie.png)
+![pz6_cookie](https://github.com/user-attachments/assets/0bdf765d-c992-41a3-a9c6-bf64fbc40630)
+
 
 **2. Страница профиля с CSRF-токеном в скрытом поле формы:**
 
-![Profile form](docs/images/pz6_profile.png)
+![pz6_profile](https://github.com/user-attachments/assets/67deafea-6434-49f8-92e2-eb0e193be4b9)
+
 
 **3. Проверка CSRF-защиты — POST с неверным токеном → 403 Forbidden:**
 
-![CSRF blocked](docs/images/pz6_csrf.png)
+![pz6_csrf](https://github.com/user-attachments/assets/049c2fc9-3d03-4502-8ffd-68df800318a3)
+
 
 Тесты Postman подтверждают корректную работу CSRF-защиты:
 
-![CSRF tests](docs/images/pz6_csrf_tests.png)
+![pz6_csrf_tests](https://github.com/user-attachments/assets/e5e11285-f24c-41ea-a5f1-7fa561070bf9)
+
 
 **4. Отправка XSS-payload `<script>alert('xss')</script>` в поле имени:**
 
-![XSS input](docs/images/pz6_xss_input.png)
+![pz6_xss_input](https://github.com/user-attachments/assets/aaacdfd2-9af1-4ca1-bc21-d6df4bd70145)
+
 
 **5. Страница /hello — скрипт экранирован (`&lt;script&gt;`), не выполняется:**
 
-![XSS safe](docs/images/pz6_xss_safe.png)
+![pz6_xss_safe](https://github.com/user-attachments/assets/699c9c72-91b4-4590-9f4e-a24ed80c92a4)
+
 
 Тесты подтверждают: тег `<script>` экранирован, XSS не сработал:
 
-![XSS tests](docs/images/pz6_xss_tests.png)
+![pz6_xss_tests](https://github.com/user-attachments/assets/a84cc5cc-a5d6-40ca-9f32-1073c0269e9f)
+
 
 ---
 
