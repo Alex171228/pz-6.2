@@ -216,7 +216,7 @@ sudo ufw allow 8080/tcp   # для HTTP
 sudo ufw allow 8443/tcp   # для HTTPS
 ```
 
-### С компьютера (проверка в браузере)
+### С компьютера
 
 **HTTP:** `http://<SERVER_IP>:8080/login`
 **HTTPS:** `https://<SERVER_IP>:8443/login` (принять самоподписанный сертификат)
@@ -235,6 +235,8 @@ fetch('/profile', {method:'POST', headers:{'Content-Type':'application/x-www-for
 5. Для проверки **XSS**: на `/profile` ввести `<script>alert('xss')</script>` и сохранить. На `/hello` скрипт отобразится как текст.
 
 6. Для проверки **комментариев**: перейти на `/comments`, ввести комментарий с HTML-тегами (например `<b>bold</b><script>alert(1)</script>`). Теги отобразятся как текст — экранирование работает.
+
+7. Для проверки можно использовать postman коллекцию 
 
 ### Остановка
 
